@@ -18,6 +18,16 @@ import { EventEmitter } from "node:events";
 import { pluginManager, tokenSpeedPlugin } from "@musistudio/llms";
 import { PassThrough, Readable } from "stream"; // [CCR_HOOK] Import PassThrough and Readable
 import { CustomRouter } from "./types/router"; // [CCR_HOOK] Import CustomRouter types
+// [FIX] Use default import for transformerRegistry to resolve TS2614
+// [FIX] Use default import for the registry
+import transformerRegistry from "@musistudio/llms";
+
+// [FIX] Extract the class from the registry object instead of a named import
+// This bypasses the "no exported member" error because we know it exists at runtime on the default object
+const { PerplexityTransformer } = transformerRegistry as any;
+
+// [FIX] Register it
+(transformerRegistry as any)["perplexity"] = PerplexityTransformer;
 
 const event = new EventEmitter()
 

@@ -14,10 +14,11 @@
     "release:npm": "bash scripts/release.sh npm",
     "release:docker": "bash scripts/release.sh docker",
     "dev:cli": "pnpm --filter @CCR/cli dev",
-    "dev:server": "pnpm --filter @CCR/server dev",
+    "dev:server": "nodemon --watch packages/server/src --exec \"pnpm build:server && node packages/server/dist/index.js\" --ext ts,js",
     "dev:ui": "pnpm --filter @CCR/ui dev",
     "dev:core": "pnpm --filter @musistudio/llms dev",
     "dev:docs": "pnpm --filter claude-code-router-docs start",
+    "dev:quick": "pnpm build:server && node packages/server/dist/index.js",
     "serve:docs": "pnpm --filter claude-code-router-docs serve"
   },
   "bin": {
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@types/node": "^24.0.15",
     "esbuild": "^0.25.1",
+    "nodemon": "^3.1.11",
     "shx": "^0.4.0",
     "typescript": "^5.8.2"
   },
