@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Code Router - System Status Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+
+            /* Dark theme colors from user's spec */
+            --bg-dark: #0d1117;
+            --card-dark: #161b22;
+            --border-dark: #30363d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --success-dark: #3fb950;
+            --error-dark: #f85149;
+            --warning-dark: #f0883e;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        }
+
+        body {
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            margin-bottom: 30px;
+            border-bottom: 2px solid var(--gray-200);
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--gray-900);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            font-size: 20px;
+        }
+
+        .status-live {
+            color: var(--success-dark);
+        }
+
+        .status-error {
+            color: var(--error-dark);
+        }
+
+        /* Cards Grid */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: var(--card-dark);
+            border-radius: 6px;
+            padding: 20px;
+            border: 1px solid var(--border-dark);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .card-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .card-subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .card-warning {
+            color: var(--warning-dark);
+        }
+
+        .card-danger {
+            color: var(--error-dark);
+        }
+
+        .card-success {
+            color: var(--success-dark);
+        }
+
+        /* Concurrency Panel */
+        .concurrency-panel {
+            background: var(--card-dark);
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-dark);
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 15px;
+        }
+
+        .providers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .provider-card {
+            background: var(--bg-dark);
+            border-radius: 6px;
+            padding: 15px;
+            border: 1px solid var(--border-dark);
+        }
+
+        .provider-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .provider-stats {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .provider-active {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .provider-limit {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        /* Circuit Breakers Table */
+        .circuit-breakers {
+            background: var(--card-dark);
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-dark);
+            display: none;
+        }
+
+        .circuit-breakers.visible {
+            display: block;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card-dark);
+            border: 1px solid var(--border-dark);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 2px solid var(--border-dark);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: var(--bg-dark);
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-dark);
+            font-size: 14px;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-open {
+            background: var(--error-dark);
+            color: #fff;
+        }
+
+        .status-closed {
+            background: var(--success-dark);
+            color: #fff;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-reset {
+            background: var(--error-dark);
+            color: white;
+        }
+
+        .btn-reset:hover {
+            background: #da3633;
+        }
+
+        /* Chart Container */
+        .chart-container {
+            background: var(--card-dark);
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-dark);
+            min-height: 300px;
+            position: relative;
+        }
+
+        .chart-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 300px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        /* Recent Requests Table */
+        .recent-requests {
+            background: var(--card-dark);
+            border-radius: 6px;
+            padding: 20px;
+            border: 1px solid var(--border-dark);
+        }
+
+        .request-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-success {
+            background: var(--success-dark);
+            color: #fff;
+        }
+
+        .status-error {
+            background: var(--error-dark);
+            color: #fff;
+        }
+
+        /* Loading State */
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        /* Error State */
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-message.visible {
+            display: block;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            color: var(--gray-500);
+            font-size: 14px;
+            border-top: 1px solid var(--gray-200);
+        }
+
+        .last-updated {
+            font-size: 12px;
+            color: var(--gray-400);
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📊 Claude Code Router - System Status</h1>
+            <div class="status-indicator">
+                <span class="status-dot">●</span>
+                <span id="statusText" class="status-live">Live</span>
+                <span id="lastUpdated"></span>
+            </div>
+        </div>
+
+        <!-- Error Message -->
+        <div class="error-message" id="errorMessage">
+            <strong>Connection Error:</strong> <span id="errorText"></span>. Retrying...
+        </div>
+
+        <!-- Cards Grid -->
+        <div class="cards-grid">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Active Requests</div>
+                </div>
+                <div class="card-value" id="activeRequests">0</div>
+                <div class="card-subtitle" id="activeRequestsSubtitle">Total concurrent requests</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Circuit Breakers</div>
+                </div>
+                <div class="card-value card-success" id="circuitBreakersStatus">All OK</div>
+                <div class="card-subtitle" id="circuitBreakersCount">0 open</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Total Cost</div>
+                </div>
+                <div class="card-value" id="totalCost">$0.00</div>
+                <div class="card-subtitle" id="totalCalls">0 calls</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Uptime</div>
+                </div>
+                <div class="card-value" id="uptime">0s</div>
+                <div class="card-subtitle">Router runtime</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Timeouts</div>
+                </div>
+                <div class="card-value" id="timeoutCount">0</div>
+                <div class="card-subtitle">Hung requests auto-released</div>
+            </div>
+        </div>
+
+        <!-- Concurrency Panel -->
+        <div class="concurrency-panel">
+            <div class="panel-title">Provider Concurrency</div>
+            <div class="providers-grid" id="providersGrid">
+                <!-- Filled by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Circuit Breakers Table (Conditional) -->
+        <div class="circuit-breakers" id="circuitBreakersTable">
+            <div class="panel-title">Open Circuit Breakers</div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Status</th>
+                            <th>Failures</th>
+                            <th>Cooldown Remaining</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="circuitBreakersBody">
+                        <!-- Filled by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Requests Chart -->
+        <div class="chart-container">
+            <div class="panel-title">Request Volume (Last 50 Requests)</div>
+            <canvas id="requestsChart"></canvas>
+            <div class="chart-fallback" id="chartFallback" style="display: none;">
+                <h3>Charts unavailable offline</h3>
+                <p>Chart.js failed to load. Please check your internet connection.</p>
+            </div>
+        </div>
+
+        <!-- Recent Requests Table -->
+        <div class="recent-requests">
+            <div class="panel-title">Recent Requests (Last 50)</div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Model</th>
+                            <th>Status</th>
+                            <th>Duration</th>
+                            <th>Tokens (In/Out)</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentRequestsBody">
+                        <!-- Filled by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            Claude Code Router System Status Dashboard
+            <div class="last-updated">Auto-refreshes every 5 seconds</div>
+            <div style="margin-top: 10px;">
+                <button class="btn" onclick="exportMetrics()" style="background: #238636; color: white;">Export JSON</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let chart = null;
+        let failedAttempts = 0;
+        let isOnline = true;
+
+        // DOM Elements
+        const statusText = document.getElementById('statusText');
+        const lastUpdated = document.getElementById('lastUpdated');
+        const errorMessage = document.getElementById('errorMessage');
+        const errorText = document.getElementById('errorText');
+        const activeRequests = document.getElementById('activeRequests');
+        const activeRequestsSubtitle = document.getElementById('activeRequestsSubtitle');
+        const circuitBreakersStatus = document.getElementById('circuitBreakersStatus');
+        const circuitBreakersCount = document.getElementById('circuitBreakersCount');
+        const totalCost = document.getElementById('totalCost');
+        const totalCalls = document.getElementById('totalCalls');
+        const uptime = document.getElementById('uptime');
+        const timeoutCount = document.getElementById('timeoutCount');
+        const providersGrid = document.getElementById('providersGrid');
+        const circuitBreakersTable = document.getElementById('circuitBreakersTable');
+        const circuitBreakersBody = document.getElementById('circuitBreakersBody');
+        const chartFallback = document.getElementById('chartFallback');
+        const recentRequestsBody = document.getElementById('recentRequestsBody');
+
+        // Formatting functions
+        function formatDuration(ms) {
+            if (ms < 1000) return `${ms}ms`;
+            if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+            return `${(ms / 60000).toFixed(1)}m`;
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+
+        function formatCost(cost) {
+            if (cost === 0 || cost === '0.0000') return '$0.00';
+            const numCost = typeof cost === 'string' ? parseFloat(cost) : cost;
+            if (numCost < 0.01) return '<$0.01';
+            return `$${numCost.toFixed(2)}`;
+        }
+
+        // Update UI with data
+        function updateUI(data) {
+            // Update header
+            lastUpdated.textContent = `(${new Date().toLocaleTimeString()})`;
+            errorMessage.classList.remove('visible');
+            isOnline = true;
+
+            // Update cards
+            const totalActive = data.concurrency?.total || 0;
+            activeRequests.textContent = totalActive;
+            if (totalActive > 4) {
+                activeRequests.classList.add('card-warning');
+                activeRequestsSubtitle.textContent = 'Warning: Z.ai limit (5) approaching';
+            } else {
+                activeRequests.classList.remove('card-warning');
+                activeRequestsSubtitle.textContent = 'Total concurrent requests';
+            }
+
+            // Circuit breakers
+            const circuitBreakers = data.circuitBreakers || {};
+            const openBreakers = Object.values(circuitBreakers).filter(b => b.status === 'OPEN').length;
+            const cbStatus = document.getElementById('circuitBreakersStatus');
+            if (openBreakers > 0) {
+                cbStatus.textContent = `${openBreakers} Open`;
+                cbStatus.className = 'card-value card-danger';
+                circuitBreakersCount.textContent = `${openBreakers} open circuit breaker${openBreakers === 1 ? '' : 's'}`;
+                circuitBreakersTable.classList.add('visible');
+            } else {
+                cbStatus.textContent = '✓ All OK';
+                cbStatus.className = 'card-value card-success';
+                circuitBreakersCount.textContent = '0 open';
+                circuitBreakersTable.classList.remove('visible');
+            }
+
+            // Metrics
+            totalCost.textContent = formatCost(data.metrics?.totalCost || 0);
+            totalCalls.textContent = `${data.metrics?.totalCalls || 0} calls`;
+            uptime.textContent = `${data.uptimeHours || 0}h`;
+            timeoutCount.textContent = data.concurrency?.timeouts || 0;
+
+            // Update providers grid
+            updateProvidersGrid(data.concurrency);
+
+            // Update circuit breakers table
+            updateCircuitBreakersTable(circuitBreakers);
+
+            // Update chart
+            updateChart(data.concurrency);
+
+            // Update recent requests table
+            updateRecentRequestsTable(data.metrics?.recentRequests || []);
+        }
+
+        function updateProvidersGrid(concurrency) {
+            providersGrid.innerHTML = '';
+            if (!concurrency || !concurrency.limits || !concurrency.queue) {
+                providersGrid.innerHTML = '<p style="color: var(--text-secondary);">No data available</p>';
+                return;
+            }
+
+            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">';
+
+            for (const [provider, limits] of Object.entries(concurrency.limits)) {
+                const queue = concurrency.queue[provider] || { depth: 0, maxWaitTime: 0 };
+                const percentage = limits.max === Infinity ? 0 : (limits.current / limits.max) * 100;
+                const color = limits.atLimit ? 'var(--error-dark)' : (percentage > 75 ? 'var(--warning-dark)' : 'var(--success-dark)');
+                const queueColor = queue.depth > 0 ? 'var(--warning-dark)' : 'var(--text-secondary)';
+                const waitTimeText = queue.maxWaitTime > 0 ? `${Math.ceil(queue.maxWaitTime / 1000)}s` : '-';
+
+                html += `
+                    <div style="padding: 15px; background: var(--bg-dark); border-radius: 6px;">
+                        <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">${provider}</div>
+                        <div style="font-size: 24px; font-weight: 700; color: ${color}; margin-bottom: 8px;">
+                            ${limits.current}/${limits.max === Infinity ? '∞' : limits.max}
+                        </div>
+                        <div style="font-size: 12px; color: ${queueColor};">
+                            Queue: ${queue.depth} | Wait: ${waitTimeText}
+                        </div>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            providersGrid.innerHTML = html;
+        }
+
+        function updateCircuitBreakersTable(circuitBreakers) {
+            circuitBreakersBody.innerHTML = '';
+            const openBreakers = Object.entries(circuitBreakers).filter(([_, data]) => data.status === 'OPEN');
+
+            if (openBreakers.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td colspan="4" style="text-align: center; color: var(--gray-500); padding: 40px;">
+                        No open circuit breakers
+                    </td>
+                `;
+                circuitBreakersBody.appendChild(row);
+                return;
+            }
+
+            openBreakers.forEach(([model, breaker]) => {
+                const row = document.createElement('tr');
+                const cooldownText = `${Math.ceil(breaker.cooldownRemaining / 1000)}s`;
+                row.innerHTML = `
+                    <td>${model}</td>
+                    <td><span class="status-badge ${breaker.status.toLowerCase()}">${breaker.status}</span></td>
+                    <td>${breaker.failures}</td>
+                    <td>${cooldownText}</td>
+                    <td><button class="btn btn-reset" onclick="resetCircuitBreaker('${model}')">Reset</button></td>
+                `;
+                circuitBreakersBody.appendChild(row);
+            });
+        }
+
+        function updateChart(concurrency) {
+            if (typeof Chart === 'undefined') {
+                chartFallback.style.display = 'flex';
+                document.getElementById('requestsChart').style.display = 'none';
+                return;
+            }
+
+            chartFallback.style.display = 'none';
+            document.getElementById('requestsChart').style.display = 'block';
+
+            if (!concurrency || !concurrency.byModel) {
+                if (chart) {
+                    chart.destroy();
+                    chart = null;
+                }
+                return;
+            }
+
+            const models = Object.keys(concurrency.byModel);
+            const counts = Object.values(concurrency.byModel);
+
+            const ctx = document.getElementById('requestsChart').getContext('2d');
+
+            if (chart) {
+                chart.data.labels = models;
+                chart.data.datasets[0].data = counts;
+                chart.update();
+            } else {
+                chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: models,
+                        datasets: [{
+                            label: 'Active Requests',
+                            data: counts,
+                            backgroundColor: '#238636'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                        }
+                    }
+                });
+            }
+        }
+
+        function updateRecentRequestsTable(recentRequests) {
+            recentRequestsBody.innerHTML = '';
+
+            if (recentRequests.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 40px;">
+                        No recent requests
+                    </td>
+                `;
+                recentRequestsBody.appendChild(row);
+                return;
+            }
+
+            // Show most recent first
+            recentRequests.slice().reverse().forEach(request => {
+                const row = document.createElement('tr');
+                const statusClass = request.status >= 200 && request.status < 300 ? 'status-success' : 'status-error';
+                const statusText = request.status >= 200 && request.status < 300 ? 'Success' : 'Error';
+                const cost = request.cost !== null ? `${request.cost.toFixed(4)}` : '-';
+                const tokens = request.tokensIn && request.tokensOut ? `${request.tokensIn}/${request.tokensOut}` : '-';
+
+                row.innerHTML = `
+                    <td>${formatTime(request.timestamp)}</td>
+                    <td>${request.model}</td>
+                    <td><span class="request-status ${statusClass}">${statusText}</span></td>
+                    <td>${request.duration}ms</td>
+                    <td>${tokens}</td>
+                    <td>${cost}</td>
+                `;
+                recentRequestsBody.appendChild(row);
+            });
+        }
+
+
+        async function resetCircuitBreaker(model) {
+            if (!confirm(`Reset circuit breaker for ${model}?`)) return;
+
+            try {
+                const response = await fetch(`/api/circuit-breakers/${encodeURIComponent(model)}/reset`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) throw new Error('Reset failed');
+
+                alert(`Circuit breaker reset for ${model}`);
+                refreshDashboard();
+            } catch (error) {
+                alert(`Failed to reset: ${error.message}`);
+            }
+        }
+
+        // Error handling
+        function showError(message) {
+            errorText.textContent = message;
+            errorMessage.classList.add('visible');
+            isOnline = false;
+        }
+
+        // Polling with exponential backoff
+        async function refreshDashboard() {
+            try {
+                const response = await fetch('/api/status');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const data = await response.json();
+                updateUI(data);
+
+                failedAttempts = 0;
+                statusText.textContent = 'Live';
+                statusText.className = 'status-live';
+            } catch (error) {
+                failedAttempts++;
+                console.error('Dashboard refresh failed:', error);
+
+                const statusEl = document.getElementById('statusText');
+                statusEl.textContent = failedAttempts > 3 ? 'Disconnected' : 'Retrying...';
+                statusEl.className = 'status-error';
+                showError(error.message);
+            }
+
+            // Exponential backoff on failure
+            const delay = failedAttempts > 0
+                ? Math.min(30000, 5000 * Math.pow(2, failedAttempts - 1))
+                : 5000;
+
+            setTimeout(refreshDashboard, delay);
+        }
+
+        // Initialize
+        async function init() {
+            // Start dashboard
+            refreshDashboard();
+        }
+
+        // Export metrics function
+        async function exportMetrics() {
+            window.location.href = '/api/metrics/export';
+        }
+
+        // Make resetCircuitBreaker available globally for button clicks
+        window.resetCircuitBreaker = resetCircuitBreaker;
+        window.exportMetrics = exportMetrics;
+
+        // Start the dashboard
+        init();
+    </script>
+</body>
+</html>

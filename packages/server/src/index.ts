@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
@@ -312,232 +312,45 @@ async function getServer(options: RunOptions = {}) {
     event.emit('onError', request, reply, error);
   })
   serverInstance.addHook("onSend", (req: any, reply: any, payload: any, done: any) => {
-    // [CCR_HOOK] Start of onSend hook modifications
-    const { customRouter, routeKey } = req;
+      // @ts-ignore - custom properties
+  const { customRouter, routeKey } = req;
 
-    // Check if it's a stream response from a routed request
-    if (customRouter && routeKey && payload && (payload instanceof Readable || typeof payload.pipe === 'function')) {
-      const monitoredStream = new PassThrough();
-      let streamClosed = false;
-
-      const onError = (err: Error) => {
-        if (streamClosed) return;
-        streamClosed = true;
-        try {
-          if (customRouter.onRequestError) {
-            customRouter.onRequestError(routeKey, err);
-          }
-        } catch (hookErr: any) {
-          req.log.error(`[CCR Hook Error] Custom router onRequestError (on stream error) failed: ${hookErr.message}`);
-        }
-      };
-
+  if (customRouter && routeKey) {
+    // Case 1: Streaming Response
+    if (payload && (payload instanceof Readable || typeof (payload as any).pipe === "function")) {
+      const stream = payload as Readable;
+      let completed = false;
       const onComplete = () => {
-        if (streamClosed) return;
-        streamClosed = true;
-        try {
-          if (customRouter.onRequestComplete) {
-            customRouter.onRequestComplete(routeKey);
+        if (!completed) {
+          completed = true;
+          try {
+            customRouter.onRequestComplete && customRouter.onRequestComplete(routeKey, req, reply);
+          } catch (err) {
+            req.log.error(`[CCR Hook Error] Custom router onRequestComplete failed: ${(err as Error).message}`);
           }
-        } catch (hookErr: any) {
-          req.log.error(`[CCR Hook Error] Custom router onRequestComplete failed: ${hookErr.message}`);
         }
       };
 
-      payload.pipe(monitoredStream);
-
-      monitoredStream.on('end', onComplete);
-      monitoredStream.on('finish', onComplete); // Also listen to finish event for completeness
-      monitoredStream.on('error', onError);
-
-      // Fastify request.raw is the Node.js http.IncomingMessage
-      if (req.raw) {
-        req.raw.on('close', () => {
-          if (!monitoredStream.destroyed) {
-            monitoredStream.destroy();
-            onError(new Error('Request aborted by client'));
-          }
-        });
-      }
-
-      // Replace original payload with the monitored one for the done() callback
-      payload = monitoredStream;
+      // Hook into stream events
+      stream.on("end", onComplete);
+      stream.on("finish", onComplete);
+      stream.on("error", () => {
+        // Error handling is usually done in onRequestError, but ensure we don't leak
+        if (!completed) onComplete();
+      });
     }
-    // [CCR_HOOK] End of onSend hook modifications
-
-    if (req.sessionId && req.pathname.endsWith("/v1/messages")) {
-      if (payload instanceof ReadableStream) {
-        if (req.agents) {
-          const abortController = new AbortController();
-          const eventStream = payload.pipeThrough(new SSEParserTransform())
-          let currentAgent: undefined | IAgent;
-          let currentToolIndex = -1
-          let currentToolName = ''
-          let currentToolArgs = ''
-          let currentToolId = ''
-          const toolMessages: any[] = []
-          const assistantMessages: any[] = []
-          // Store Anthropic format message body, distinguishing text and tool types
-          return done(null, rewriteStream(eventStream, async (data, controller) => {
-            try {
-              // Detect tool call start
-              if (data.event === 'content_block_start' && data?.data?.content_block?.name) {
-                const agent = req.agents.find((name: string) => agentsManager.getAgent(name)?.tools.get(data.data.content_block.name))
-                if (agent) {
-                  currentAgent = agentsManager.getAgent(agent)
-                  currentToolIndex = data.data.index
-                  currentToolName = data.data.content_block.name
-                  currentToolId = data.data.content_block.id
-                  return undefined;
-                }
-              }
-
-              // Collect tool arguments
-              if (currentToolIndex > -1 && data.data.index === currentToolIndex && data.data?.delta?.type === 'input_json_delta') {
-                currentToolArgs += data.data?.delta?.partial_json;
-                return undefined;
-              }
-
-              // Tool call completed, handle agent invocation
-              if (currentToolIndex > -1 && data.data.index === currentToolIndex && data.data.type === 'content_block_stop') {
-                try {
-                  const args = JSON5.parse(currentToolArgs);
-                  assistantMessages.push({
-                    type: "tool_use",
-                    id: currentToolId,
-                    name: currentToolName,
-                    input: args
-                  })
-                  const toolResult = await currentAgent?.tools.get(currentToolName)?.handler(args, {
-                    req,
-                    config
-                  });
-                  toolMessages.push({
-                    "tool_use_id": currentToolId,
-                    "type": "tool_result",
-                    "content": toolResult
-                  })
-                  currentAgent = undefined
-                  currentToolIndex = -1
-                  currentToolName = ''
-                  currentToolArgs = ''
-                  currentToolId = ''
-                } catch (e) {
-                  console.log(e);
-                }
-                return undefined;
-              }
-
-              if (data.event === 'message_delta' && toolMessages.length) {
-                req.body.messages.push({
-                  role: 'assistant',
-                  content: assistantMessages
-                })
-                req.body.messages.push({
-                  role: 'user',
-                  content: toolMessages
-                })
-                const response = await fetch(`http://127.0.0.1:${config.PORT || 3456}/v1/messages`, {
-                  method: "POST",
-                  headers: {
-                    'x-api-key': config.APIKEY,
-                    'content-type': 'application/json',
-                  },
-                  body: JSON.stringify(req.body),
-                })
-                if (!response.ok) {
-                  return undefined;
-                }
-                const stream = response.body!.pipeThrough(new SSEParserTransform() as any)
-                const reader = stream.getReader()
-                while (true) {
-                  try {
-                    const {value, done} = await reader.read();
-                    if (done) {
-                      break;
-                    }
-                    const eventData = value as any;
-                    if (['message_start', 'message_stop'].includes(eventData.event)) {
-                      continue
-                    }
-
-                    // Check if stream is still writable
-                    if (!controller.desiredSize) {
-                      break;
-                    }
-
-                    controller.enqueue(eventData)
-                  }catch (readError: any) {
-                    if (readError.name === 'AbortError' || readError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-                      abortController.abort(); // Abort all related operations
-                      break;
-                    }
-                    throw readError;
-                  }
-
-                }
-                return undefined
-              }
-              return data
-            }catch (error: any) {
-              console.error('Unexpected error in stream processing:', error);
-
-              // Handle premature stream closure error
-              if (error.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-                abortController.abort();
-                return undefined;
-              }
-
-              // Re-throw other errors
-              throw error;
-            }
-          }).pipeThrough(new SSESerializerTransform()))
-        }
-
-        const [originalStream, clonedStream] = payload.tee();
-        const read = async (stream: ReadableStream) => {
-          const reader = stream.getReader();
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              // Process the value if needed
-              const dataStr = new TextDecoder().decode(value);
-              if (!dataStr.startsWith("event: message_delta")) {
-                continue;
-              }
-              const str = dataStr.slice(27);
-              try {
-                const message = JSON.parse(str);
-                sessionUsageCache.put(req.sessionId, message.usage);
-              } catch {}
-            }
-          } catch (readError: any) {
-            if (readError.name === 'AbortError' || readError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-              console.error('Background read stream closed prematurely');
-            } else {
-              console.error('Error in background stream reading:', readError);
-            }
-          } finally {
-            reader.releaseLock();
-          }
-        }
-        read(clonedStream);
-        return done(null, originalStream)
-      }
-      sessionUsageCache.put(req.sessionId, payload.usage);
-      if (typeof payload ==='object') {
-        if (payload.error) {
-          return done(payload.error, null)
-        } else {
-          return done(payload, null)
-        }
+    // Case 2: Non-Streaming (Buffered) Response (THE FIX)
+    else {
+      try {
+        // Call complete immediately for buffered responses
+        customRouter.onRequestComplete && customRouter.onRequestComplete(routeKey, req, reply);
+      } catch (err) {
+        req.log.error(`[CCR Hook Error] Custom router onRequestComplete (buffered) failed: ${(err as Error).message}`);
       }
     }
-    if (typeof payload ==='object' && payload.error) {
-      return done(payload.error, null)
-    }
-    done(null, payload)
+  }
+
+  done(null, payload);
   });
   serverInstance.addHook("onSend", async (req: any, reply: any, payload: any) => {
     event.emit('onSend', req, reply, payload);
@@ -565,6 +378,22 @@ async function run() {
 
     return { success: true, message: "Service restart initiated" }
   });
+
+  // Dashboard route
+  server.app.get("/ui/dashboard", async (req: any, reply: any) => {
+    try {
+      const htmlPath = join(__dirname, "ui", "dashboard.html");
+      const html = readFileSync(htmlPath, "utf8");
+
+      reply.header("Content-Type", "text/html; charset=utf-8");
+      reply.header("Cache-Control", "no-cache");
+      return reply.send(html);
+    } catch (error: any) {
+      console.error("[Server] Failed to serve dashboard:", error);
+      return reply.code(500).send("Dashboard unavailable");
+    }
+  });
+
   await server.start();
 }
 

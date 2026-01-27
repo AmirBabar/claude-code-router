@@ -462,6 +462,83 @@ export const createServer = async (config: any): Promise<any> => {
     }
   });
 
+  // System Status Dashboard API Endpoints
+  app.get("/api/status", async (req: any, reply: any) => {
+    try {
+      // Get the custom router from request (attached in preHandler hook)
+      const customRouter = (req as any).customRouter;
+
+      if (!customRouter?.state) {
+        return reply.code(503).send({
+          error: "Router state not available",
+          message: "Custom router is not configured"
+        });
+      }
+
+      const status = await customRouter.state.getSystemStatus(customRouter.failureTracker);
+
+      return reply.send({
+        ...status,
+        serverUptime: process.uptime(),
+        nodeVersion: process.version,
+        timestamp: Date.now()
+      });
+    } catch (error: any) {
+      console.error("[API] Status endpoint failed:", error);
+      return reply.code(500).send({
+        error: "Internal error",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  app.post("/api/circuit-breakers/:model/reset", async (req: any, reply: any) => {
+    try {
+      const { model } = req.params as { model: string };
+      const customRouter = (req as any).customRouter;
+
+      if (!customRouter?.state || !customRouter?.failureTracker) {
+        return reply.code(503).send({ error: "Not available" });
+      }
+
+      customRouter.state.resetCircuitBreaker(model, customRouter.failureTracker);
+
+      return reply.send({
+        success: true,
+        model,
+        resetAt: Date.now()
+      });
+    } catch (error: any) {
+      return reply.code(500).send({
+        error: "Reset failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  app.get("/api/metrics/export", async (req: any, reply: any) => {
+    try {
+      const customRouter = (req as any).customRouter;
+
+      if (!customRouter?.state) {
+        return reply.code(503).send({ error: "Not available" });
+      }
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        ...customRouter.state.getSystemStatus(customRouter.failureTracker)
+      };
+
+      const filename = `router-status-${new Date().toISOString().split('T')[0]}.json`;
+
+      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      reply.header('Content-Type', 'application/json');
+      return reply.send(exportData);
+    } catch (error: any) {
+      return reply.code(500).send({ error: "Export failed" });
+    }
+  });
+
   // Helper function: Load preset from ZIP
   async function loadPresetFromZip(zipFile: string): Promise<PresetFile> {
     const zip = new AdmZip(zipFile);
