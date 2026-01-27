@@ -25,6 +25,15 @@ export class AnthropicTransformer implements Transformer {
     this.useBearer = this.options?.UseBearer ?? false;
   }
 
+  private getCachedTokens(usage: any): number {
+    // Try prompt_tokens_details?.cached_tokens first (OpenAI standard),
+    // then prompt_cache_hit_tokens (DeepSeek-specific)
+    // Using `any` type to handle both standard and non-standard cache fields
+    return usage?.prompt_tokens_details?.cached_tokens ||
+           usage?.prompt_cache_hit_tokens ||
+           0;
+  }
+
   async auth(request: any, provider: LLMProvider): Promise<any> {
     const headers: Record<string, string | undefined> = {};
 
@@ -386,7 +395,7 @@ export class AnthropicTransformer implements Transformer {
 
                 const choice = chunk.choices?.[0];
                 if (chunk.usage) {
-                  const cached = chunk.usage?.prompt_tokens_details?.cached_tokens || chunk.usage?.prompt_cache_hit_tokens || 0;
+                  const cached = this.getCachedTokens(chunk.usage);
                   stopReasonMessageDelta = {
                     type: "message_delta",
                     delta: { stop_reason: "end_turn", stop_sequence: null },
@@ -559,7 +568,7 @@ export class AnthropicTransformer implements Transformer {
         });
       }
       
-      const cached = openaiResponse.usage?.prompt_tokens_details?.cached_tokens || (openaiResponse.usage as any)?.prompt_cache_hit_tokens || 0;
+      const cached = this.getCachedTokens(openaiResponse.usage);
       
       return {
         id: openaiResponse.id,
